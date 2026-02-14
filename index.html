@@ -378,6 +378,7 @@
                         <option value="aex">AEX (Dutch broad market)</option>
                         <option value="msci" selected>MSCI World</option>
                         <option value="dax">DAX (German market)</option>
+                        <option value="btc">Bitcoin</option>
                         <option value="custom">Custom parameters</option>
                     </select>
                 </div>
@@ -406,6 +407,15 @@
                 <div class="checkbox-field">
                     <input type="checkbox" id="showComparison" checked />
                     <label for="showComparison">Show no-tax comparison (0% rate)</label>
+                </div>
+                <div class="field">
+                    <label for="yScale">Y-Axis Scale</label>
+                    <select id="yScale">
+                        <option value="smart" selected>Smart (clip outliers)</option>
+                        <option value="all">Show all</option>
+                        <option value="log">Logarithmic</option>
+                    </select>
+                    <div class="hint">Smart clips extreme paths for readability</div>
                 </div>
 
                 <div style="margin-top: 1.2rem">
@@ -441,6 +451,8 @@
           Using 8.5% as conservative long-term real-world expectation.
      MSCI World: ~8.7% annualized since 1988, ~14.5% std dev (MSCI factsheet)
      DAX: ~7% CAGR since 1970 (total return index), ~19% std dev (curvo.eu, 55y)
+     Bitcoin: ~30% return (conservative vs 92% CAGR since 2011, per curvo.eu),
+             ~60% vol (down from 148% early days; recent 2y vol trending to 50-60%)
    ========================================================== */
             const INDEX_MODELS = {
                 aex: {
@@ -460,6 +472,12 @@
                     annualReturn: 0.07,
                     annualVol: 0.19,
                     desc: "<strong>DAX:</strong> ~7% annual return, ~19% volatility. 40 largest German companies. Total return index since 1970.",
+                },
+                btc: {
+                    name: "Bitcoin",
+                    annualReturn: 0.3,
+                    annualVol: 0.6,
+                    desc: "<strong>Bitcoin:</strong> ~30% annual return, ~60% volatility. Highly speculative &mdash; parameters based on recent 5-8 year data. Historical vol was &gt;100%; trending down as asset matures. Use with caution.",
                 },
                 custom: {
                     name: "Custom",
@@ -613,7 +631,7 @@
             /* ==========================================================
    CHART BUILDING
    ========================================================== */
-            function buildChart(taxed, noTax, tStats, ntStats, years) {
+            function buildChart(taxed, noTax, tStats, ntStats, years, yScaleMode) {
                 const ctx = document.getElementById("chartCanvas").getContext("2d");
                 const labels = [];
                 for (let y = 0; y <= years; y++) labels.push(y);
@@ -751,24 +769,46 @@
                                 min: 0,
                                 max: years,
                             },
-                            y: {
-                                title: {
-                                    display: true,
-                                    text: "Portfolio Value (\u20AC)",
-                                    color: "#8b8fa3",
-                                    font: { size: 12 },
-                                },
-                                ticks: {
-                                    color: "#5a5e73",
-                                    callback: (v) => {
-                                        if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + "M";
-                                        if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(0) + "k";
-                                        return v;
+                            y: (function () {
+                                const base = {
+                                    title: {
+                                        display: true,
+                                        text: "Portfolio Value (\u20AC)",
+                                        color: "#8b8fa3",
+                                        font: { size: 12 },
                                     },
-                                },
-                                grid: { color: "rgba(46,51,72,0.5)" },
-                                beginAtZero: true,
-                            },
+                                    ticks: {
+                                        color: "#5a5e73",
+                                        callback: (v) => {
+                                            if (Math.abs(v) >= 1e9)
+                                                return (v / 1e9).toFixed(1) + "B";
+                                            if (Math.abs(v) >= 1e6)
+                                                return (v / 1e6).toFixed(1) + "M";
+                                            if (Math.abs(v) >= 1e3)
+                                                return (v / 1e3).toFixed(0) + "k";
+                                            return v;
+                                        },
+                                    },
+                                    grid: { color: "rgba(46,51,72,0.5)" },
+                                };
+                                if (yScaleMode === "log") {
+                                    base.type = "logarithmic";
+                                    base.min = undefined;
+                                } else if (yScaleMode === "smart") {
+                                    /* Use max of P90 curves (taxed + no-tax) with 1.3x headroom */
+                                    let ceiling = 0;
+                                    for (let t = 0; t <= years; t++) {
+                                        ceiling = Math.max(ceiling, tStats.p90[t]);
+                                        if (ntStats) ceiling = Math.max(ceiling, ntStats.p90[t]);
+                                    }
+                                    ceiling = Math.ceil(ceiling * 1.3);
+                                    base.max = ceiling;
+                                    base.beginAtZero = true;
+                                } else {
+                                    base.beginAtZero = true;
+                                }
+                                return base;
+                            })(),
                         },
                     },
                 });
@@ -995,6 +1035,7 @@
 
                 const tStats = computeStats(taxed, years);
                 const ntStats = noTax.length > 0 ? computeStats(noTax, years) : null;
+                const yScaleMode = document.getElementById("yScale").value;
 
                 /* Update chart title */
                 const modelName = INDEX_MODELS[modelKey] ? INDEX_MODELS[modelKey].name : "Custom";
@@ -1005,7 +1046,7 @@
                     numSims +
                     " simulations";
 
-                buildChart(taxed, noTax, tStats, ntStats, years);
+                buildChart(taxed, noTax, tStats, ntStats, years, yScaleMode);
                 buildStats(
                     taxed,
                     noTax,
