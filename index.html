@@ -371,6 +371,68 @@
                 </div>
 
                 <hr class="divider" style="margin: 1.2rem 0" />
+                <h2>&#127465;&#127466; German Abgeltungssteuer</h2>
+                <div class="checkbox-field">
+                    <input type="checkbox" id="showDE" />
+                    <label for="showDE">Show DE capital gains tax comparison</label>
+                </div>
+                <div id="deParams" style="display: none">
+                    <div class="custom-params">
+                        <div class="field">
+                            <label for="deKist">Kirchensteuer</label>
+                            <select id="deKist">
+                                <option value="0" selected>None (26.375% total)</option>
+                                <option value="8">8% &mdash; BW, BY (27.82% total)</option>
+                                <option value="9">9% &mdash; other states (28.00% total)</option>
+                            </select>
+                        </div>
+                        <div class="field">
+                            <label for="deBasiszins">Basiszins (%)</label>
+                            <input
+                                type="number"
+                                id="deBasiszins"
+                                value="2.53"
+                                min="0"
+                                max="10"
+                                step="0.01"
+                            />
+                            <div class="hint">
+                                Bundesbank reference rate for Vorabpauschale (2025: 2.53%)
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label for="dePauschbetrag">Sparer-Pauschbetrag (&euro;)</label>
+                            <input
+                                type="number"
+                                id="dePauschbetrag"
+                                value="1000"
+                                min="0"
+                                step="100"
+                            />
+                            <div class="hint">&euro;1,000 pp. / &euro;2,000 joint</div>
+                        </div>
+                        <div class="field">
+                            <label for="deTeilfreistellung">Teilfreistellung (%)</label>
+                            <input
+                                type="number"
+                                id="deTeilfreistellung"
+                                value="30"
+                                min="0"
+                                max="100"
+                                step="1"
+                            />
+                            <div class="hint">30% for equity funds (Aktienfonds &ge;51%)</div>
+                        </div>
+                    </div>
+                    <div class="info-banner" style="margin-bottom: 1rem">
+                        <strong>DE model:</strong> Abgeltungssteuer 25% + 5.5% Soli (+ optional
+                        KiSt). Only realized gains taxed. Annual Vorabpauschale on ETFs.
+                        Teilfreistellung 30% for equity funds. Chart shows net liquidation value
+                        (deferred tax subtracted).
+                    </div>
+                </div>
+
+                <hr class="divider" style="margin: 1.2rem 0" />
                 <h2>&#128200; Market Model</h2>
                 <div class="field">
                     <label for="indexModel">Index / Return Model</label>
@@ -497,6 +559,20 @@
                 document.getElementById("modelInfo").innerHTML = INDEX_MODELS[m].desc;
             });
 
+            /* DE checkbox toggle */
+            document.getElementById("showDE").addEventListener("change", function () {
+                document.getElementById("deParams").style.display = this.checked
+                    ? "block"
+                    : "none";
+            });
+
+            /* Compute DE effective tax rate */
+            function deEffectiveRate(kistPct) {
+                if (kistPct === 0) return 0.26375; /* 25% + 5.5% Soli */
+                const modBase = 25 / (1 + (kistPct / 100) * 0.25);
+                return (modBase * (1 + 0.055 + kistPct / 100)) / 100;
+            }
+
             /* Box-Muller normal random */
             function randn() {
                 let u = 0,
@@ -517,9 +593,9 @@
             }
 
             /* ==========================================================
-   CORE SIMULATION
+   CORE SIMULATION — NL (unrealized gains / capital growth tax)
    Geometric Brownian Motion, monthly steps.
-   Tax assessed annually on unrealized gains (capital growth tax).
+   Tax assessed annually on unrealized gains.
    ========================================================== */
             function simulatePath(params) {
                 const {
@@ -596,6 +672,126 @@
             }
 
             /* ==========================================================
+   CORE SIMULATION — DE (Abgeltungssteuer / realized gains)
+   Same GBM returns, but German tax rules:
+     - Vorabpauschale (annual advance lump-sum tax on ETFs)
+     - Teilfreistellung (30% equity fund exemption)
+     - Tax only on realized gains (withdrawals / sales)
+     - Sparer-Pauschbetrag (annual tax-free allowance)
+   Values stored NET of deferred tax for fair comparison.
+   ========================================================== */
+            function simulatePathDE(params) {
+                const {
+                    startCapital,
+                    years,
+                    monthlyFlow,
+                    annualReturn,
+                    annualVol,
+                    deTaxRate,
+                    basiszins,
+                    teilfreistellung,
+                    sparerPauschbetrag,
+                } = params;
+
+                const totalMonths = years * 12;
+                const dt = 1 / 12;
+                const drift = (annualReturn - 0.5 * annualVol * annualVol) * dt;
+                const diffusion = annualVol * Math.sqrt(dt);
+                const tfFactor =
+                    1 - teilfreistellung; /* taxable fraction after Teilfreistellung */
+
+                const yearlyValues = new Float64Array(years + 1);
+                let portfolio = startCapital;
+                let costBasis = startCapital;
+                let totalTaxPaid = 0;
+                let sparerRemaining = sparerPauschbetrag; /* resets each year */
+                let portfolioStartOfYear = startCapital;
+
+                /* Helper: consume Sparer-Pauschbetrag, return remaining taxable amount */
+                function afterPausch(taxableAmount) {
+                    if (taxableAmount <= 0) return 0;
+                    if (sparerRemaining >= taxableAmount) {
+                        sparerRemaining -= taxableAmount;
+                        return 0;
+                    }
+                    const rest = taxableAmount - sparerRemaining;
+                    sparerRemaining = 0;
+                    return rest;
+                }
+
+                /* Net value = portfolio minus deferred tax liability */
+                function netValue() {
+                    const unrealGain = Math.max(0, portfolio - costBasis);
+                    const deferredTax = afterTeilAndRate(unrealGain);
+                    return portfolio - deferredTax;
+                }
+                function afterTeilAndRate(gain) {
+                    return Math.max(0, gain * tfFactor) * deTaxRate;
+                }
+
+                yearlyValues[0] = netValue();
+
+                for (let m = 1; m <= totalMonths; m++) {
+                    /* Monthly market return */
+                    const z = randn();
+                    portfolio *= Math.exp(drift + diffusion * z);
+                    if (portfolio < 0) portfolio = 0;
+
+                    /* Monthly contribution or withdrawal */
+                    if (monthlyFlow >= 0) {
+                        /* Contribution: just add to portfolio and cost basis */
+                        portfolio += monthlyFlow;
+                        costBasis += monthlyFlow;
+                    } else {
+                        /* Withdrawal: realize proportional gains */
+                        const wAmt = Math.min(Math.abs(monthlyFlow), portfolio);
+                        if (portfolio > 0 && wAmt > 0) {
+                            const frac = wAmt / portfolio;
+                            const propGain = Math.max(0, (portfolio - costBasis) * frac);
+                            const taxable = afterPausch(propGain * tfFactor);
+                            const tax = taxable * deTaxRate;
+                            totalTaxPaid += tax;
+                            /* Reduce cost basis proportionally */
+                            costBasis *= 1 - frac;
+                            portfolio -= wAmt + tax;
+                        }
+                    }
+                    if (portfolio < 0) portfolio = 0;
+
+                    /* End-of-year: Vorabpauschale + reset */
+                    if (m % 12 === 0) {
+                        if (portfolio > 0) {
+                            /* Vorabpauschale */
+                            const yearGain = portfolio - portfolioStartOfYear;
+                            const basisertrag = Math.max(
+                                0,
+                                portfolioStartOfYear * basiszins * 0.7,
+                            );
+                            const vorabpauschale = Math.max(0, Math.min(basisertrag, yearGain));
+
+                            if (vorabpauschale > 0) {
+                                const taxable = afterPausch(vorabpauschale * tfFactor);
+                                const tax = taxable * deTaxRate;
+                                portfolio -= tax;
+                                totalTaxPaid += tax;
+                                /* Vorabpauschale increases cost basis (future credit) */
+                                costBasis += vorabpauschale;
+                            }
+                        }
+
+                        /* Record net-of-deferred-tax value */
+                        yearlyValues[m / 12] = netValue();
+
+                        /* Reset for next year */
+                        sparerRemaining = sparerPauschbetrag;
+                        portfolioStartOfYear = portfolio;
+                    }
+                }
+
+                return { values: yearlyValues, totalTaxPaid };
+            }
+
+            /* ==========================================================
    BATCH SIMULATION + STATISTICS
    ========================================================== */
             function computeStats(results, numYears) {
@@ -631,7 +827,16 @@
             /* ==========================================================
    CHART BUILDING
    ========================================================== */
-            function buildChart(taxed, noTax, tStats, ntStats, years, yScaleMode) {
+            function buildChart(
+                taxed,
+                noTax,
+                tStats,
+                ntStats,
+                years,
+                yScaleMode,
+                deResults,
+                deStats,
+            ) {
                 const ctx = document.getElementById("chartCanvas").getContext("2d");
                 const labels = [];
                 for (let y = 0; y <= years; y++) labels.push(y);
@@ -685,6 +890,33 @@
                     tension: 0.2,
                     order: 1,
                 });
+
+                /* DE Abgeltungssteuer comparison */
+                if (deStats) {
+                    for (let i = 0; i < deResults.length; i++) {
+                        datasets.push({
+                            label: "",
+                            data: Array.from(deResults[i].values),
+                            borderColor: "rgba(255,152,0,0.06)",
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0.2,
+                            order: 10,
+                        });
+                    }
+                    datasets.push({
+                        label: "Median (DE Abgeltungsst.)",
+                        data: Array.from(deStats.median),
+                        borderColor: "#ff9800",
+                        borderWidth: 3,
+                        borderDash: [4, 3],
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0.2,
+                        order: 1,
+                    });
+                }
 
                 /* No-tax comparison */
                 if (ntStats) {
@@ -795,11 +1027,12 @@
                                     base.type = "logarithmic";
                                     base.min = undefined;
                                 } else if (yScaleMode === "smart") {
-                                    /* Use max of P90 curves (taxed + no-tax) with 1.3x headroom */
+                                    /* Use max of P90 curves (taxed + no-tax + DE) with 1.3x headroom */
                                     let ceiling = 0;
                                     for (let t = 0; t <= years; t++) {
                                         ceiling = Math.max(ceiling, tStats.p90[t]);
                                         if (ntStats) ceiling = Math.max(ceiling, ntStats.p90[t]);
+                                        if (deStats) ceiling = Math.max(ceiling, deStats.p90[t]);
                                     }
                                     ceiling = Math.ceil(ceiling * 1.3);
                                     base.max = ceiling;
@@ -826,6 +1059,7 @@
                 startCap,
                 monthlyFlow,
                 taxRate,
+                deStats,
             ) {
                 const grid = document.getElementById("statsGrid");
                 const comp = document.getElementById("comparisonRow");
@@ -888,29 +1122,70 @@
                             ? ((1 - medianFinal / noTaxMedian) * 100).toFixed(1)
                             : "0.0";
                     html += statCard(
-                        "Tax Drag on Wealth",
+                        "NL Tax Drag on Wealth",
                         drag + "%",
                         "stat-warn",
-                        "Wealth lost to unrealized gains tax vs. no-tax scenario",
+                        "Wealth lost to NL unrealized gains tax vs. no-tax",
                     );
 
                     const absLoss = noTaxMedian - medianFinal;
                     html += statCard(
-                        "Absolute Tax Impact",
+                        "NL Absolute Tax Impact",
                         fmtEuroFull(absLoss),
                         "stat-negative",
                         "Median no-tax: " + fmtEuro(noTaxMedian),
                     );
                 }
 
+                /* DE comparison stats */
+                if (deStats) {
+                    const deMedian = deStats.median[years];
+                    const deMedianTax = deStats.taxes[Math.floor(n * 0.5)];
+                    html += statCard(
+                        "DE Median Final (net)",
+                        fmtEuroFull(deMedian),
+                        "stat-warn",
+                        "Net of deferred tax. Tax paid: " + fmtEuro(deMedianTax),
+                    );
+
+                    if (ntStats) {
+                        const noTaxMedian = ntStats.median[years];
+                        const deDrag =
+                            noTaxMedian > 0
+                                ? ((1 - deMedian / noTaxMedian) * 100).toFixed(1)
+                                : "0.0";
+                        html += statCard(
+                            "DE Tax Drag on Wealth",
+                            deDrag + "%",
+                            "stat-warn",
+                            "DE Abgeltungssteuer vs. no-tax",
+                        );
+                    }
+
+                    const nlVsDe = medianFinal - deMedian;
+                    html += statCard(
+                        "NL vs DE Difference",
+                        fmtEuroFull(nlVsDe),
+                        nlVsDe >= 0 ? "stat-positive" : "stat-negative",
+                        nlVsDe < 0
+                            ? "NL unrealized gains tax costs " +
+                                  fmtEuro(Math.abs(nlVsDe)) +
+                                  " more"
+                            : "NL comes out ahead by " + fmtEuro(nlVsDe),
+                    );
+                }
+
                 grid.innerHTML = html;
 
                 /* Comparison table */
-                if (ntStats) {
+                if (ntStats || deStats) {
                     comp.style.display = "grid";
+                    if (deStats) comp.style.gridTemplateColumns = "1fr 1fr 1fr";
+                    else comp.style.gridTemplateColumns = "1fr 1fr";
                     let c = "";
+
                     c +=
-                        '<div class="comparison-card"><h4>With Tax (' +
+                        '<div class="comparison-card"><h4>&#127475;&#127473; NL Box 3 (' +
                         (taxRate * 100).toFixed(1) +
                         "%)</h4>";
                     c += compItem("Median final", fmtEuroFull(tStats.median[years]));
@@ -920,14 +1195,28 @@
                     c += compItem("Median tax paid", fmtEuroFull(medianTax));
                     c += "</div>";
 
-                    const noTaxMedianTax = ntStats.taxes[Math.floor(n * 0.5)];
-                    c += '<div class="comparison-card"><h4>Without Tax (0%)</h4>';
-                    c += compItem("Median final", fmtEuroFull(ntStats.median[years]));
-                    c += compItem("P10 (pessimistic)", fmtEuroFull(ntStats.p10[years]));
-                    c += compItem("P90 (optimistic)", fmtEuroFull(ntStats.p90[years]));
-                    c += compItem("Mean final", fmtEuroFull(ntStats.mean[years]));
-                    c += compItem("Median tax paid", fmtEuroFull(noTaxMedianTax));
-                    c += "</div>";
+                    if (deStats) {
+                        const deMedianTax = deStats.taxes[Math.floor(n * 0.5)];
+                        c +=
+                            '<div class="comparison-card"><h4>&#127465;&#127466; DE Abgeltungsst.</h4>';
+                        c += compItem("Median final (net)", fmtEuroFull(deStats.median[years]));
+                        c += compItem("P10 (pessimistic)", fmtEuroFull(deStats.p10[years]));
+                        c += compItem("P90 (optimistic)", fmtEuroFull(deStats.p90[years]));
+                        c += compItem("Mean final (net)", fmtEuroFull(deStats.mean[years]));
+                        c += compItem("Median tax paid", fmtEuroFull(deMedianTax));
+                        c += "</div>";
+                    }
+
+                    if (ntStats) {
+                        const noTaxMedianTax = ntStats.taxes[Math.floor(n * 0.5)];
+                        c += '<div class="comparison-card"><h4>No Tax (0%)</h4>';
+                        c += compItem("Median final", fmtEuroFull(ntStats.median[years]));
+                        c += compItem("P10 (pessimistic)", fmtEuroFull(ntStats.p10[years]));
+                        c += compItem("P90 (optimistic)", fmtEuroFull(ntStats.p90[years]));
+                        c += compItem("Mean final", fmtEuroFull(ntStats.mean[years]));
+                        c += compItem("Median tax paid", fmtEuroFull(noTaxMedianTax));
+                        c += "</div>";
+                    }
 
                     comp.innerHTML = c;
                 } else {
@@ -998,6 +1287,7 @@
                     Math.max(1, parseInt(document.getElementById("numSims").value) || 50),
                 );
                 const showComparison = document.getElementById("showComparison").checked;
+                const showDE = document.getElementById("showDE").checked;
 
                 const modelKey = document.getElementById("indexModel").value;
                 let annualReturn, annualVol;
@@ -1033,6 +1323,31 @@
                         noTax.push(simulatePath({ ...baseParams, taxRate: 0 }));
                 }
 
+                /* DE Abgeltungssteuer comparison simulations */
+                let deResults = [];
+                let deStats = null;
+                if (showDE) {
+                    const kistPct = parseFloat(document.getElementById("deKist").value) || 0;
+                    const deTaxRate = deEffectiveRate(kistPct);
+                    const basiszins =
+                        (parseFloat(document.getElementById("deBasiszins").value) || 2.53) / 100;
+                    const teilfreistellung =
+                        (parseFloat(document.getElementById("deTeilfreistellung").value) || 30) /
+                        100;
+                    const sparerPauschbetrag =
+                        parseFloat(document.getElementById("dePauschbetrag").value) || 1000;
+
+                    const deParams = {
+                        ...baseParams,
+                        deTaxRate,
+                        basiszins,
+                        teilfreistellung,
+                        sparerPauschbetrag,
+                    };
+                    for (let i = 0; i < numSims; i++) deResults.push(simulatePathDE(deParams));
+                    deStats = computeStats(deResults, years);
+                }
+
                 const tStats = computeStats(taxed, years);
                 const ntStats = noTax.length > 0 ? computeStats(noTax, years) : null;
                 const yScaleMode = document.getElementById("yScale").value;
@@ -1046,7 +1361,7 @@
                     numSims +
                     " simulations";
 
-                buildChart(taxed, noTax, tStats, ntStats, years, yScaleMode);
+                buildChart(taxed, noTax, tStats, ntStats, years, yScaleMode, deResults, deStats);
                 buildStats(
                     taxed,
                     noTax,
@@ -1056,6 +1371,7 @@
                     startCapital,
                     monthlyFlow,
                     taxRate,
+                    deStats,
                 );
             }
         </script>
