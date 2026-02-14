@@ -1,0 +1,1022 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Unrealized Gains Tax Simulator – Netherlands Box 3 Reform</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+        <style>
+            :root {
+                --bg: #0f1117;
+                --surface: #1a1d27;
+                --surface2: #242836;
+                --border: #2e3348;
+                --text: #e2e4ed;
+                --text-dim: #8b8fa3;
+                --accent: #6c8cff;
+                --accent2: #ff6c6c;
+                --accent3: #4ecdc4;
+                --green: #4caf50;
+                --red: #ef5350;
+                --orange: #ff9800;
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family:
+                    "Segoe UI",
+                    system-ui,
+                    -apple-system,
+                    sans-serif;
+                background: var(--bg);
+                color: var(--text);
+                min-height: 100vh;
+            }
+            header {
+                background: var(--surface);
+                border-bottom: 1px solid var(--border);
+                padding: 1.2rem 2rem;
+                text-align: center;
+            }
+            header h1 {
+                font-size: 1.4rem;
+                font-weight: 600;
+                letter-spacing: -0.02em;
+            }
+            header h1 span {
+                color: var(--accent);
+            }
+            header p {
+                color: var(--text-dim);
+                font-size: 0.85rem;
+                margin-top: 0.3rem;
+            }
+            .app {
+                display: grid;
+                grid-template-columns: 340px 1fr;
+                gap: 0;
+                min-height: calc(100vh - 72px);
+            }
+            .sidebar {
+                background: var(--surface);
+                border-right: 1px solid var(--border);
+                padding: 1.5rem;
+                overflow-y: auto;
+                max-height: calc(100vh - 72px);
+            }
+            .sidebar h2 {
+                font-size: 0.75rem;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: var(--text-dim);
+                margin-bottom: 1rem;
+                padding-bottom: 0.5rem;
+                border-bottom: 1px solid var(--border);
+            }
+            .field {
+                margin-bottom: 1rem;
+            }
+            .field label {
+                display: block;
+                font-size: 0.82rem;
+                color: var(--text-dim);
+                margin-bottom: 0.3rem;
+            }
+            .field input,
+            .field select {
+                width: 100%;
+                padding: 0.55rem 0.7rem;
+                background: var(--surface2);
+                border: 1px solid var(--border);
+                border-radius: 6px;
+                color: var(--text);
+                font-size: 0.9rem;
+                outline: none;
+                transition: border-color 0.2s;
+            }
+            .field input:focus,
+            .field select:focus {
+                border-color: var(--accent);
+            }
+            .field select {
+                cursor: pointer;
+            }
+            .field .hint {
+                font-size: 0.72rem;
+                color: var(--text-dim);
+                margin-top: 0.2rem;
+                opacity: 0.7;
+            }
+            .custom-params {
+                background: var(--bg);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                padding: 0.8rem;
+                margin-bottom: 1rem;
+            }
+            .custom-params .field {
+                margin-bottom: 0.7rem;
+            }
+            .custom-params .field:last-child {
+                margin-bottom: 0;
+            }
+            .btn {
+                width: 100%;
+                padding: 0.7rem;
+                border: none;
+                border-radius: 8px;
+                font-size: 0.95rem;
+                font-weight: 600;
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+            .btn-primary {
+                background: var(--accent);
+                color: #fff;
+            }
+            .btn-primary:hover {
+                background: #5a7ae6;
+                transform: translateY(-1px);
+            }
+            .btn-primary:active {
+                transform: translateY(0);
+            }
+            .checkbox-field {
+                display: flex;
+                align-items: center;
+                gap: 0.5rem;
+                margin-bottom: 1rem;
+            }
+            .checkbox-field input[type="checkbox"] {
+                width: 16px;
+                height: 16px;
+                accent-color: var(--accent);
+                cursor: pointer;
+            }
+            .checkbox-field label {
+                font-size: 0.82rem;
+                color: var(--text-dim);
+                cursor: pointer;
+            }
+            .main {
+                padding: 1.5rem;
+                display: flex;
+                flex-direction: column;
+                gap: 1.5rem;
+                overflow-y: auto;
+                max-height: calc(100vh - 72px);
+            }
+            .chart-container {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: 12px;
+                padding: 1.2rem;
+                flex: 1;
+                min-height: 420px;
+                position: relative;
+            }
+            .chart-container h3 {
+                font-size: 0.9rem;
+                font-weight: 600;
+                margin-bottom: 0.8rem;
+            }
+            .chart-wrap {
+                position: relative;
+                width: 100%;
+                height: calc(100% - 2rem);
+                min-height: 370px;
+            }
+            .stats-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                gap: 1rem;
+            }
+            .stat-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 1rem;
+            }
+            .stat-card .stat-label {
+                font-size: 0.72rem;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                color: var(--text-dim);
+                margin-bottom: 0.3rem;
+            }
+            .stat-card .stat-value {
+                font-size: 1.3rem;
+                font-weight: 700;
+            }
+            .stat-card .stat-sub {
+                font-size: 0.78rem;
+                color: var(--text-dim);
+                margin-top: 0.15rem;
+            }
+            .stat-positive {
+                color: var(--green);
+            }
+            .stat-negative {
+                color: var(--red);
+            }
+            .stat-neutral {
+                color: var(--accent);
+            }
+            .stat-warn {
+                color: var(--orange);
+            }
+            .comparison-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 1rem;
+            }
+            .comparison-card {
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                padding: 1rem 1.2rem;
+            }
+            .comparison-card h4 {
+                font-size: 0.8rem;
+                color: var(--text-dim);
+                margin-bottom: 0.6rem;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+            .comparison-item {
+                display: flex;
+                justify-content: space-between;
+                padding: 0.35rem 0;
+                font-size: 0.88rem;
+            }
+            .comparison-item + .comparison-item {
+                border-top: 1px solid var(--border);
+            }
+            .divider {
+                border: none;
+                border-top: 1px solid var(--border);
+                margin: 0.5rem 0;
+            }
+            .info-banner {
+                background: rgba(108, 140, 255, 0.08);
+                border: 1px solid rgba(108, 140, 255, 0.2);
+                border-radius: 8px;
+                padding: 0.8rem 1rem;
+                font-size: 0.8rem;
+                color: var(--text-dim);
+                line-height: 1.5;
+            }
+            .info-banner strong {
+                color: var(--accent);
+            }
+            .spinner {
+                display: none;
+                width: 20px;
+                height: 20px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-top-color: #fff;
+                border-radius: 50%;
+                animation: spin 0.6s linear infinite;
+                margin: 0 auto;
+            }
+            @keyframes spin {
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+            .placeholder-msg {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                color: var(--text-dim);
+                font-size: 0.9rem;
+                text-align: center;
+            }
+            .tax-impact-bar {
+                margin-top: 0.5rem;
+                background: var(--surface2);
+                border-radius: 6px;
+                height: 10px;
+                overflow: hidden;
+                position: relative;
+            }
+            .tax-impact-bar-fill {
+                height: 100%;
+                border-radius: 6px;
+                transition: width 0.5s ease;
+            }
+            @media (max-width: 900px) {
+                .app {
+                    grid-template-columns: 1fr;
+                }
+                .sidebar {
+                    max-height: none;
+                    border-right: none;
+                    border-bottom: 1px solid var(--border);
+                }
+                .main {
+                    max-height: none;
+                }
+                .comparison-row {
+                    grid-template-columns: 1fr;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <header>
+            <h1>&#128202; Unrealized Gains Tax <span>Simulator</span></h1>
+            <p>
+                Simulating the impact of the proposed Dutch Box 3 reform on long-term wealth
+                accumulation
+            </p>
+        </header>
+
+        <div class="app">
+            <aside class="sidebar">
+                <h2>&#128176; Portfolio Settings</h2>
+                <div class="field">
+                    <label for="startCapital">Starting Capital (&euro;)</label>
+                    <input type="number" id="startCapital" value="100000" min="0" step="1000" />
+                </div>
+                <div class="field">
+                    <label for="years">Simulation Duration (years)</label>
+                    <input type="number" id="years" value="30" min="1" max="80" step="1" />
+                </div>
+                <div class="field">
+                    <label for="monthlyFlow">Monthly Savings / Withdrawal (&euro;)</label>
+                    <input type="number" id="monthlyFlow" value="500" step="50" />
+                    <div class="hint">Positive = savings, Negative = withdrawal</div>
+                </div>
+
+                <hr class="divider" style="margin: 1.2rem 0" />
+                <h2>&#127963; Tax Settings</h2>
+                <div class="field">
+                    <label for="taxRate">Unrealized Gains Tax Rate (%)</label>
+                    <input type="number" id="taxRate" value="36" min="0" max="100" step="0.1" />
+                    <div class="hint">NL Box 3: 36%. Set 0 for no-tax baseline.</div>
+                </div>
+                <div class="checkbox-field">
+                    <input type="checkbox" id="lossCarry" checked />
+                    <label for="lossCarry">Allow loss carry-forward</label>
+                </div>
+                <div class="field">
+                    <label for="exemption">Tax-free allowance (&euro;)</label>
+                    <input type="number" id="exemption" value="57000" min="0" step="1000" />
+                    <div class="hint">2025 Box 3: &euro;57,000 pp. Set 0 to ignore.</div>
+                </div>
+
+                <hr class="divider" style="margin: 1.2rem 0" />
+                <h2>&#128200; Market Model</h2>
+                <div class="field">
+                    <label for="indexModel">Index / Return Model</label>
+                    <select id="indexModel">
+                        <option value="aex">AEX (Dutch broad market)</option>
+                        <option value="msci" selected>MSCI World</option>
+                        <option value="dax">DAX (German market)</option>
+                        <option value="custom">Custom parameters</option>
+                    </select>
+                </div>
+                <div class="custom-params" id="customParams" style="display: none">
+                    <div class="field">
+                        <label for="customReturn">Expected Annual Return (%)</label>
+                        <input type="number" id="customReturn" value="8" step="0.1" />
+                    </div>
+                    <div class="field">
+                        <label for="customVol">Annual Volatility / Std Dev (%)</label>
+                        <input type="number" id="customVol" value="15" step="0.1" />
+                    </div>
+                </div>
+                <div id="modelInfo" class="info-banner">
+                    <strong>MSCI World:</strong> ~8.5% annual return, ~14.5% volatility. Global
+                    diversified large &amp; mid cap. Long-term historical data.
+                </div>
+
+                <hr class="divider" style="margin: 1.2rem 0" />
+                <h2>&#9881; Simulation Settings</h2>
+                <div class="field">
+                    <label for="numSims">Number of Simulations</label>
+                    <input type="number" id="numSims" value="50" min="1" max="500" step="1" />
+                    <div class="hint">More paths = better statistics, slower render</div>
+                </div>
+                <div class="checkbox-field">
+                    <input type="checkbox" id="showComparison" checked />
+                    <label for="showComparison">Show no-tax comparison (0% rate)</label>
+                </div>
+
+                <div style="margin-top: 1.2rem">
+                    <button class="btn btn-primary" id="runBtn" onclick="runSimulation()">
+                        &#9654; Run Simulation
+                    </button>
+                    <div class="spinner" id="spinner"></div>
+                </div>
+            </aside>
+
+            <main class="main" id="mainArea">
+                <div class="chart-container">
+                    <h3 id="chartTitle">Portfolio Value Over Time</h3>
+                    <div class="chart-wrap">
+                        <canvas id="chartCanvas"></canvas>
+                        <div class="placeholder-msg" id="placeholder">
+                            Configure parameters and click
+                            <strong>&#9654; Run Simulation</strong> to begin.
+                        </div>
+                    </div>
+                </div>
+                <div class="stats-grid" id="statsGrid" style="display: none"></div>
+                <div class="comparison-row" id="comparisonRow" style="display: none"></div>
+            </main>
+        </div>
+
+        <script>
+            /* ==========================================================
+   INDEX MODEL PARAMETERS
+   Historical sources:
+     AEX: ~10.9% gross total return since 1983 (Euronext factsheet),
+          ~18% annualized std dev (curvo.eu, 25y)
+          Using 8.5% as conservative long-term real-world expectation.
+     MSCI World: ~8.7% annualized since 1988, ~14.5% std dev (MSCI factsheet)
+     DAX: ~7% CAGR since 1970 (total return index), ~19% std dev (curvo.eu, 55y)
+   ========================================================== */
+            const INDEX_MODELS = {
+                aex: {
+                    name: "AEX (Dutch broad market)",
+                    annualReturn: 0.085,
+                    annualVol: 0.18,
+                    desc: "<strong>AEX Index:</strong> ~8.5% annual return, ~18% volatility. Top 25 Dutch companies on Euronext Amsterdam. Historical data since 1983.",
+                },
+                msci: {
+                    name: "MSCI World",
+                    annualReturn: 0.085,
+                    annualVol: 0.145,
+                    desc: "<strong>MSCI World:</strong> ~8.5% annual return, ~14.5% volatility. Global diversified large &amp; mid cap. Long-term historical data.",
+                },
+                dax: {
+                    name: "DAX (German market)",
+                    annualReturn: 0.07,
+                    annualVol: 0.19,
+                    desc: "<strong>DAX:</strong> ~7% annual return, ~19% volatility. 40 largest German companies. Total return index since 1970.",
+                },
+                custom: {
+                    name: "Custom",
+                    annualReturn: 0.08,
+                    annualVol: 0.15,
+                    desc: "<strong>Custom:</strong> Enter your own return and volatility parameters.",
+                },
+            };
+
+            let chart = null;
+
+            /* Index model selector */
+            document.getElementById("indexModel").addEventListener("change", function () {
+                const m = this.value;
+                document.getElementById("customParams").style.display =
+                    m === "custom" ? "block" : "none";
+                document.getElementById("modelInfo").innerHTML = INDEX_MODELS[m].desc;
+            });
+
+            /* Box-Muller normal random */
+            function randn() {
+                let u = 0,
+                    v = 0;
+                while (u === 0) u = Math.random();
+                while (v === 0) v = Math.random();
+                return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+            }
+
+            /* Format number as readable euro string */
+            function fmtEuro(n) {
+                if (Math.abs(n) >= 1e6) return "\u20AC" + (n / 1e6).toFixed(2) + "M";
+                if (Math.abs(n) >= 1e3) return "\u20AC" + (n / 1e3).toFixed(1) + "k";
+                return "\u20AC" + n.toFixed(0);
+            }
+            function fmtEuroFull(n) {
+                return "\u20AC" + Math.round(n).toLocaleString("de-DE");
+            }
+
+            /* ==========================================================
+   CORE SIMULATION
+   Geometric Brownian Motion, monthly steps.
+   Tax assessed annually on unrealized gains (capital growth tax).
+   ========================================================== */
+            function simulatePath(params) {
+                const {
+                    startCapital,
+                    years,
+                    monthlyFlow,
+                    taxRate,
+                    annualReturn,
+                    annualVol,
+                    lossCarry,
+                    exemption,
+                } = params;
+
+                const totalMonths = years * 12;
+                const dt = 1 / 12;
+                const drift = (annualReturn - 0.5 * annualVol * annualVol) * dt;
+                const diffusion = annualVol * Math.sqrt(dt);
+
+                /* Store yearly values only (for chart: year 0..years) */
+                const yearlyValues = new Float64Array(years + 1);
+                let portfolio = startCapital;
+                let costBasis = startCapital;
+                let carriedLoss = 0;
+                let totalTaxPaid = 0;
+
+                yearlyValues[0] = portfolio;
+
+                for (let m = 1; m <= totalMonths; m++) {
+                    /* Monthly market return via GBM */
+                    const z = randn();
+                    portfolio *= Math.exp(drift + diffusion * z);
+
+                    /* Monthly contribution / withdrawal */
+                    portfolio += monthlyFlow;
+                    costBasis += monthlyFlow;
+                    if (portfolio < 0) portfolio = 0;
+
+                    /* End-of-year tax assessment */
+                    if (m % 12 === 0 && taxRate > 0 && portfolio > 0) {
+                        let gain = portfolio - costBasis;
+
+                        /* Loss carry-forward */
+                        if (lossCarry && carriedLoss > 0 && gain > 0) {
+                            const offset = Math.min(gain, carriedLoss);
+                            gain -= offset;
+                            carriedLoss -= offset;
+                        }
+
+                        if (gain > 0) {
+                            /* Tax only portion above exemption */
+                            if (portfolio > exemption) {
+                                const taxableBase = portfolio - exemption;
+                                const taxableFrac = Math.min(1, taxableBase / portfolio);
+                                const tax = gain * taxableFrac * taxRate;
+                                portfolio -= tax;
+                                totalTaxPaid += tax;
+                            }
+                        } else if (gain < 0 && lossCarry) {
+                            carriedLoss += Math.abs(gain);
+                        }
+
+                        /* Reset cost basis after annual assessment */
+                        costBasis = portfolio;
+                        if (portfolio < 0) portfolio = 0;
+                    }
+
+                    /* Record yearly snapshot */
+                    if (m % 12 === 0) {
+                        yearlyValues[m / 12] = portfolio;
+                    }
+                }
+
+                return { values: yearlyValues, totalTaxPaid };
+            }
+
+            /* ==========================================================
+   BATCH SIMULATION + STATISTICS
+   ========================================================== */
+            function computeStats(results, numYears) {
+                const n = results.length;
+                const len = numYears + 1;
+                const median = new Float64Array(len);
+                const p10 = new Float64Array(len);
+                const p90 = new Float64Array(len);
+                const mean = new Float64Array(len);
+                const col = new Float64Array(n);
+
+                for (let t = 0; t < len; t++) {
+                    let sum = 0;
+                    for (let i = 0; i < n; i++) {
+                        col[i] = results[i].values[t];
+                        sum += col[i];
+                    }
+                    col.sort();
+                    median[t] = col[Math.floor(n * 0.5)];
+                    p10[t] = col[Math.max(0, Math.floor(n * 0.1))];
+                    p90[t] = col[Math.min(n - 1, Math.floor(n * 0.9))];
+                    mean[t] = sum / n;
+                }
+
+                const finals = results.map((r) => r.values[numYears]);
+                const taxes = results.map((r) => r.totalTaxPaid);
+                finals.sort((a, b) => a - b);
+                taxes.sort((a, b) => a - b);
+
+                return { median, p10, p90, mean, finals, taxes };
+            }
+
+            /* ==========================================================
+   CHART BUILDING
+   ========================================================== */
+            function buildChart(taxed, noTax, tStats, ntStats, years) {
+                const ctx = document.getElementById("chartCanvas").getContext("2d");
+                const labels = [];
+                for (let y = 0; y <= years; y++) labels.push(y);
+
+                const datasets = [];
+
+                /* Ghost lines: taxed paths */
+                for (let i = 0; i < taxed.length; i++) {
+                    datasets.push({
+                        label: "",
+                        data: Array.from(taxed[i].values),
+                        borderColor: "rgba(108,140,255,0.08)",
+                        borderWidth: 1,
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0.2,
+                        order: 10,
+                    });
+                }
+
+                /* P10-P90 band taxed */
+                datasets.push({
+                    label: "Taxed P90",
+                    data: Array.from(tStats.p90),
+                    borderColor: "transparent",
+                    backgroundColor: "rgba(108,140,255,0.06)",
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.2,
+                    order: 5,
+                });
+                datasets.push({
+                    label: "Taxed P10",
+                    data: Array.from(tStats.p10),
+                    borderColor: "transparent",
+                    backgroundColor: "rgba(108,140,255,0.06)",
+                    pointRadius: 0,
+                    fill: "-1",
+                    tension: 0.2,
+                    order: 5,
+                });
+
+                /* Median taxed */
+                datasets.push({
+                    label: "Median (taxed)",
+                    data: Array.from(tStats.median),
+                    borderColor: "#6c8cff",
+                    borderWidth: 3,
+                    pointRadius: 0,
+                    fill: false,
+                    tension: 0.2,
+                    order: 1,
+                });
+
+                /* No-tax comparison */
+                if (ntStats) {
+                    for (let i = 0; i < noTax.length; i++) {
+                        datasets.push({
+                            label: "",
+                            data: Array.from(noTax[i].values),
+                            borderColor: "rgba(78,205,196,0.06)",
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false,
+                            tension: 0.2,
+                            order: 10,
+                        });
+                    }
+                    datasets.push({
+                        label: "Median (no tax)",
+                        data: Array.from(ntStats.median),
+                        borderColor: "#4ecdc4",
+                        borderWidth: 3,
+                        borderDash: [8, 4],
+                        pointRadius: 0,
+                        fill: false,
+                        tension: 0.2,
+                        order: 1,
+                    });
+                }
+
+                if (chart) chart.destroy();
+
+                chart = new Chart(ctx, {
+                    type: "line",
+                    data: { labels, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        animation: { duration: 300 },
+                        interaction: { mode: "index", intersect: false },
+                        plugins: {
+                            legend: {
+                                display: true,
+                                labels: {
+                                    color: "#8b8fa3",
+                                    font: { size: 11 },
+                                    filter: (item) => item.text && item.text.startsWith("Median"),
+                                    usePointStyle: true,
+                                    pointStyle: "line",
+                                },
+                            },
+                            tooltip: {
+                                enabled: true,
+                                filter: (item) =>
+                                    item.dataset.label && item.dataset.label.startsWith("Median"),
+                                callbacks: {
+                                    title: (items) =>
+                                        items.length ? "Year " + items[0].parsed.x : "",
+                                    label: (item) =>
+                                        item.dataset.label + ": " + fmtEuroFull(item.parsed.y),
+                                },
+                                backgroundColor: "#1a1d27",
+                                borderColor: "#2e3348",
+                                borderWidth: 1,
+                                titleColor: "#e2e4ed",
+                                bodyColor: "#e2e4ed",
+                                padding: 10,
+                            },
+                        },
+                        scales: {
+                            x: {
+                                type: "linear",
+                                title: {
+                                    display: true,
+                                    text: "Years",
+                                    color: "#8b8fa3",
+                                    font: { size: 12 },
+                                },
+                                ticks: {
+                                    color: "#5a5e73",
+                                    stepSize: Math.max(1, Math.round(years / 10)),
+                                },
+                                grid: { color: "rgba(46,51,72,0.5)" },
+                                min: 0,
+                                max: years,
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: "Portfolio Value (\u20AC)",
+                                    color: "#8b8fa3",
+                                    font: { size: 12 },
+                                },
+                                ticks: {
+                                    color: "#5a5e73",
+                                    callback: (v) => {
+                                        if (Math.abs(v) >= 1e6) return (v / 1e6).toFixed(1) + "M";
+                                        if (Math.abs(v) >= 1e3) return (v / 1e3).toFixed(0) + "k";
+                                        return v;
+                                    },
+                                },
+                                grid: { color: "rgba(46,51,72,0.5)" },
+                                beginAtZero: true,
+                            },
+                        },
+                    },
+                });
+            }
+
+            /* ==========================================================
+   STATS PANEL
+   ========================================================== */
+            function buildStats(
+                taxed,
+                noTax,
+                tStats,
+                ntStats,
+                years,
+                startCap,
+                monthlyFlow,
+                taxRate,
+            ) {
+                const grid = document.getElementById("statsGrid");
+                const comp = document.getElementById("comparisonRow");
+                grid.style.display = "grid";
+
+                const n = taxed.length;
+                const totalContrib = startCap + monthlyFlow * 12 * years;
+                const medianFinal = tStats.median[years];
+                const medianTax = tStats.taxes[Math.floor(n * 0.5)];
+                const medianReturn =
+                    medianFinal > 0 && totalContrib > 0
+                        ? (
+                              (Math.pow(medianFinal / Math.max(1, startCap || 1), 1 / years) - 1) *
+                              100
+                          ).toFixed(2)
+                        : "0.00";
+
+                let html = "";
+
+                html += statCard(
+                    "Median Final Value",
+                    fmtEuroFull(medianFinal),
+                    medianFinal >= totalContrib ? "stat-positive" : "stat-negative",
+                    "P10: " +
+                        fmtEuro(tStats.p10[years]) +
+                        " &middot; P90: " +
+                        fmtEuro(tStats.p90[years]),
+                );
+
+                html += statCard(
+                    "Total Contributed",
+                    fmtEuroFull(totalContrib),
+                    "stat-neutral",
+                    fmtEuro(startCap) +
+                        " start + " +
+                        fmtEuro(monthlyFlow * 12 * years) +
+                        " savings",
+                );
+
+                html += statCard(
+                    "Median Total Tax Paid",
+                    fmtEuroFull(medianTax),
+                    medianTax > 0 ? "stat-negative" : "stat-positive",
+                    "Tax rate: " + (taxRate * 100).toFixed(1) + "%",
+                );
+
+                const medianGain = medianFinal - totalContrib;
+                html += statCard(
+                    "Median Net Gain",
+                    fmtEuroFull(medianGain),
+                    medianGain >= 0 ? "stat-positive" : "stat-negative",
+                    "After tax, inflation not included",
+                );
+
+                /* Tax drag */
+                if (ntStats) {
+                    const noTaxMedian = ntStats.median[years];
+                    const drag =
+                        noTaxMedian > 0
+                            ? ((1 - medianFinal / noTaxMedian) * 100).toFixed(1)
+                            : "0.0";
+                    html += statCard(
+                        "Tax Drag on Wealth",
+                        drag + "%",
+                        "stat-warn",
+                        "Wealth lost to unrealized gains tax vs. no-tax scenario",
+                    );
+
+                    const absLoss = noTaxMedian - medianFinal;
+                    html += statCard(
+                        "Absolute Tax Impact",
+                        fmtEuroFull(absLoss),
+                        "stat-negative",
+                        "Median no-tax: " + fmtEuro(noTaxMedian),
+                    );
+                }
+
+                grid.innerHTML = html;
+
+                /* Comparison table */
+                if (ntStats) {
+                    comp.style.display = "grid";
+                    let c = "";
+                    c +=
+                        '<div class="comparison-card"><h4>With Tax (' +
+                        (taxRate * 100).toFixed(1) +
+                        "%)</h4>";
+                    c += compItem("Median final", fmtEuroFull(tStats.median[years]));
+                    c += compItem("P10 (pessimistic)", fmtEuroFull(tStats.p10[years]));
+                    c += compItem("P90 (optimistic)", fmtEuroFull(tStats.p90[years]));
+                    c += compItem("Mean final", fmtEuroFull(tStats.mean[years]));
+                    c += compItem("Median tax paid", fmtEuroFull(medianTax));
+                    c += "</div>";
+
+                    const noTaxMedianTax = ntStats.taxes[Math.floor(n * 0.5)];
+                    c += '<div class="comparison-card"><h4>Without Tax (0%)</h4>';
+                    c += compItem("Median final", fmtEuroFull(ntStats.median[years]));
+                    c += compItem("P10 (pessimistic)", fmtEuroFull(ntStats.p10[years]));
+                    c += compItem("P90 (optimistic)", fmtEuroFull(ntStats.p90[years]));
+                    c += compItem("Mean final", fmtEuroFull(ntStats.mean[years]));
+                    c += compItem("Median tax paid", fmtEuroFull(noTaxMedianTax));
+                    c += "</div>";
+
+                    comp.innerHTML = c;
+                } else {
+                    comp.style.display = "none";
+                }
+            }
+
+            function statCard(label, value, cls, sub) {
+                return (
+                    '<div class="stat-card">' +
+                    '<div class="stat-label">' +
+                    label +
+                    "</div>" +
+                    '<div class="stat-value ' +
+                    cls +
+                    '">' +
+                    value +
+                    "</div>" +
+                    (sub ? '<div class="stat-sub">' + sub + "</div>" : "") +
+                    "</div>"
+                );
+            }
+
+            function compItem(label, value) {
+                return (
+                    '<div class="comparison-item"><span>' +
+                    label +
+                    "</span><strong>" +
+                    value +
+                    "</strong></div>"
+                );
+            }
+
+            /* ==========================================================
+   RUN SIMULATION (entry point)
+   ========================================================== */
+            function runSimulation() {
+                const btn = document.getElementById("runBtn");
+                const spinner = document.getElementById("spinner");
+                btn.style.display = "none";
+                spinner.style.display = "block";
+                document.getElementById("placeholder").style.display = "none";
+
+                requestAnimationFrame(() => {
+                    setTimeout(() => {
+                        try {
+                            doSimulation();
+                        } catch (e) {
+                            console.error(e);
+                            alert("Simulation error: " + e.message);
+                        }
+                        btn.style.display = "block";
+                        spinner.style.display = "none";
+                    }, 50);
+                });
+            }
+
+            function doSimulation() {
+                const startCapital =
+                    parseFloat(document.getElementById("startCapital").value) || 0;
+                const years = parseInt(document.getElementById("years").value) || 30;
+                const monthlyFlow = parseFloat(document.getElementById("monthlyFlow").value) || 0;
+                const taxRate = (parseFloat(document.getElementById("taxRate").value) || 0) / 100;
+                const lossCarry = document.getElementById("lossCarry").checked;
+                const exemption = parseFloat(document.getElementById("exemption").value) || 0;
+                const numSims = Math.min(
+                    500,
+                    Math.max(1, parseInt(document.getElementById("numSims").value) || 50),
+                );
+                const showComparison = document.getElementById("showComparison").checked;
+
+                const modelKey = document.getElementById("indexModel").value;
+                let annualReturn, annualVol;
+                if (modelKey === "custom") {
+                    annualReturn =
+                        (parseFloat(document.getElementById("customReturn").value) || 8) / 100;
+                    annualVol =
+                        (parseFloat(document.getElementById("customVol").value) || 15) / 100;
+                } else {
+                    annualReturn = INDEX_MODELS[modelKey].annualReturn;
+                    annualVol = INDEX_MODELS[modelKey].annualVol;
+                }
+
+                const baseParams = {
+                    startCapital,
+                    years,
+                    monthlyFlow,
+                    annualReturn,
+                    annualVol,
+                    lossCarry,
+                    exemption,
+                };
+
+                /* Taxed simulations */
+                const taxed = [];
+                for (let i = 0; i < numSims; i++)
+                    taxed.push(simulatePath({ ...baseParams, taxRate }));
+
+                /* No-tax comparison simulations */
+                let noTax = [];
+                if (showComparison && taxRate > 0) {
+                    for (let i = 0; i < numSims; i++)
+                        noTax.push(simulatePath({ ...baseParams, taxRate: 0 }));
+                }
+
+                const tStats = computeStats(taxed, years);
+                const ntStats = noTax.length > 0 ? computeStats(noTax, years) : null;
+
+                /* Update chart title */
+                const modelName = INDEX_MODELS[modelKey] ? INDEX_MODELS[modelKey].name : "Custom";
+                document.getElementById("chartTitle").textContent =
+                    "Portfolio Value Over Time \u2014 " +
+                    modelName +
+                    " \u2014 " +
+                    numSims +
+                    " simulations";
+
+                buildChart(taxed, noTax, tStats, ntStats, years);
+                buildStats(
+                    taxed,
+                    noTax,
+                    tStats,
+                    ntStats,
+                    years,
+                    startCapital,
+                    monthlyFlow,
+                    taxRate,
+                );
+            }
+        </script>
+    </body>
+</html>
