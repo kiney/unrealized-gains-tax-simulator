@@ -42,20 +42,51 @@ Returns are modelled as Geometric Brownian Motion with monthly steps.
 
 ### 🇳🇱 NL Box 3 — Unrealized Gains Tax (proposed)
 
-Annual tax on the full change in portfolio value (realized + unrealized). Tax is paid from the portfolio each year, reducing the invested amount. Supports loss carry-forward and a tax-free allowance.
+The Netherlands is reforming its Box 3 wealth tax ("Wet werkelijk rendement") to tax **actual returns including unrealized gains** annually, replacing the current fictitious-return system. The bill targets a 2028 start date.
+
+How it works in the simulation:
+
+1. At the end of each year, the **total change in portfolio value** is computed (price gains + contributions − withdrawals). This includes unrealized gains — you don't need to sell anything for the tax to apply.
+2. The gain is taxed at the configured rate (default 36%, the current Box 3 rate). The tax is paid from the portfolio, shrinking the invested capital.
+3. **Tax-free allowance (vrijstelling):** The first €57,000 per person (2025) of portfolio value is exempt. Only the fraction of the portfolio above this threshold is subject to tax. Set to 0 to ignore, or double it for fiscal partners.
+4. **Loss carry-forward (verliesverrekening):** If enabled, years with negative returns create a loss balance that offsets gains in future years before tax is applied. This prevents paying tax immediately after recovering from a dip. The proposed law includes this mechanism.
+
+The key impact: because tax is levied every year on paper gains, the portfolio loses compounding power. Even in years where you don't sell anything, capital is drained to pay the tax bill.
 
 ### 🇩🇪 DE Abgeltungssteuer — Realized Gains Tax
 
-German capital gains tax on realized gains only. Configurable parameters:
+Germany taxes capital gains only when **realized** (i.e. when you actually sell). For buy-and-hold ETF investors, the main annual tax event is the small Vorabpauschale. This model is included for comparison to show how a realized-gains regime differs in long-term wealth impact.
+
+How it works in the simulation:
+
+1. **Abgeltungssteuer:** Flat 25% on capital gains + 5.5% Solidaritätszuschlag on top = **26.375%** effective rate. With Kirchensteuer: 27.82% (8%, BW/BY) or ~28% (9%, other states).
+2. **Teilfreistellung:** For equity funds (≥51% equities), 30% of gains are tax-exempt. Only 70% of any gain is taxable.
+3. **Vorabpauschale:** A small annual advance tax on ETFs. Calculated as: fund value at start of year × Basiszins × 0.7, capped at the actual year's gain. If the fund lost value, it's zero. This prevents indefinite tax deferral but is much smaller than a full unrealized gains tax.
+4. **Sparer-Pauschbetrag:** €1,000 per person (€2,000 joint) annual tax-free allowance on all capital income. Applied before the Vorabpauschale and realized gains.
+5. **On withdrawal/sale:** The proportional share of unrealized gains is realized and taxed (after Teilfreistellung and Pauschbetrag). Previously paid Vorabpauschale is credited against the cost basis to avoid double taxation.
 
 | Parameter | Default | Description |
 |---|---|---|
-| Kirchensteuer | None | None (26.375% total), 8% BW/BY (27.82%), or 9% other states (28.00%) |
-| Basiszins | 2.53% | Bundesbank reference rate for the annual Vorabpauschale (2025 value) |
-| Sparer-Pauschbetrag | €1,000 | Annual tax-free allowance on capital income per person |
-| Teilfreistellung | 30% | Tax exemption for equity funds (Aktienfonds ≥51% equities) |
+| Kirchensteuer | None | None (26.375%), 8% BW/BY (27.82%), or 9% other states (~28%) |
+| Basiszins | 2.53% | Bundesbank reference rate for Vorabpauschale (2025 value) |
+| Sparer-Pauschbetrag | €1,000 | Annual tax-free allowance per person |
+| Teilfreistellung | 30% | Equity fund exemption |
 
-The effective tax rate is 25% Abgeltungssteuer + 5.5% Solidaritätszuschlag + optional Kirchensteuer. Withdrawals trigger proportional gain realization. The chart shows portfolio values **net of deferred tax liability** for fair comparison with the NL model.
+To make the comparison fair, the chart shows the DE portfolio **net of deferred tax liability** — i.e. what you'd have left if you liquidated everything at that point. Without this adjustment, the DE line would look artificially better simply because tax hasn't been collected yet.
+
+## Reading the Chart
+
+Up to three groups of simulation paths are shown, each with faded individual Monte Carlo paths and a highlighted median line:
+
+| Color | Line style | Meaning |
+|---|---|---|
+| 🔵 Blue (solid) | Solid median, faded paths | **NL Box 3** — portfolio after annual unrealized gains tax |
+| 🟠 Orange (short dash) | Dashed median, faded paths | **DE Abgeltungssteuer** — portfolio net of deferred tax liability |
+| 🟢 Teal (long dash) | Dashed median, faded paths | **No tax** — baseline without any taxation |
+
+The shaded blue band behind the NL paths marks the P10–P90 range (middle 80% of outcomes). Paths outside this range are visible as faded lines but may be clipped by the Smart y-axis scaling.
+
+Statistics cards below the chart show median final values, total tax paid, tax drag, and a direct NL-vs-DE comparison. The three-column comparison table at the bottom gives P10/median/P90/mean for each regime side by side.
 
 ## Y-Axis Scaling
 
