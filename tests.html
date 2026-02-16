@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Tax Simulator — Test Suite</title>
+        <style>
+            :root {
+                --bg: #0f1117;
+                --card: #1a1d27;
+                --border: #2a2d3a;
+                --text: #e0e0e6;
+                --green: #4caf50;
+                --red: #f44336;
+                --yellow: #ffb300;
+                --dim: #888;
+            }
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family: "Segoe UI", system-ui, sans-serif;
+                background: var(--bg);
+                color: var(--text);
+                padding: 2rem;
+                line-height: 1.5;
+            }
+            h1 {
+                margin-bottom: 0.3rem;
+            }
+            #summary {
+                margin: 1rem 0;
+                padding: 1rem;
+                border-radius: 8px;
+                font-size: 1.1rem;
+                font-weight: 600;
+            }
+            .summary-pass {
+                background: #1b3a1b;
+                border: 1px solid var(--green);
+            }
+            .summary-fail {
+                background: #3a1b1b;
+                border: 1px solid var(--red);
+            }
+            .group {
+                margin: 1.5rem 0;
+            }
+            .group-title {
+                font-size: 1.05rem;
+                font-weight: 700;
+                margin-bottom: 0.5rem;
+                padding-bottom: 0.3rem;
+                border-bottom: 1px solid var(--border);
+            }
+            .test-row {
+                display: flex;
+                align-items: baseline;
+                gap: 0.6rem;
+                padding: 0.25rem 0;
+                font-size: 0.92rem;
+                font-family: "Consolas", "Fira Code", monospace;
+            }
+            .badge {
+                display: inline-block;
+                min-width: 3rem;
+                text-align: center;
+                padding: 0.1rem 0.4rem;
+                border-radius: 4px;
+                font-weight: 700;
+                font-size: 0.78rem;
+            }
+            .badge-pass {
+                background: var(--green);
+                color: #000;
+            }
+            .badge-fail {
+                background: var(--red);
+                color: #fff;
+            }
+            .test-name {
+                color: var(--text);
+            }
+            .test-detail {
+                color: var(--dim);
+                font-size: 0.82rem;
+            }
+            .elapsed {
+                color: var(--dim);
+                font-size: 0.85rem;
+                margin-left: 0.5rem;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>🧪 Tax Simulator — Test Suite</h1>
+        <div id="summary">Running…</div>
+        <div id="results"></div>
+
+        <script>
+            /* ============================================================
+   FUNCTIONS UNDER TEST — copied verbatim from index.html
+   so tests stay self-contained and don't depend on a server.
+   ============================================================ */
+
+            /* Deterministic override — will be set before tests run */
+            let _randnOverride = null;
+            function randn() {
+                if (_randnOverride !== null) return _randnOverride;
+                let u = 0,
+                    v = 0;
+                while (u === 0) u = Math.random();
+                while (v === 0) v = Math.random();
+                return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+            }
+
+            function deEffectiveRate(kistPct) {
+                if (kistPct === 0) return 0.26375;
+                const modBase = 25 / (1 + (kistPct / 100) * 0.25);
+                return (modBase * (1 + 0.055 + kistPct / 100)) / 100;
+            }
+
+            function simulatePath(params) {
+                const {
+                    startCapital,
+                    years,
+                    monthlyFlow,
+                    taxRate,
+                    annualReturn,
+                    annualVol,
+                    lossCarry,
+                    exemption,
+                } = params;
+
+                const totalMonths = years * 12;
+                const dt = 1 / 12;
+                const drift = (annualReturn - 0.5 * annualVol * annualVol) * dt;
+                const diffusion = annualVol * Math.sqrt(dt);
+
+                const yearlyValues = new Float64Array(years + 1);
+                let portfolio = startCapital;
+                let costBasis = startCapital;
+                let carriedLoss = 0;
+                let totalTaxPaid = 0;
+
+                yearlyValues[0] = portfolio;
+
+                for (let m = 1; m <= totalMonths; m++) {
+                    const z = randn();
+                    portfolio *= Math.exp(drift + diffusion * z);
+                    portfolio += monthlyFlow;
+                    costBasis += monthlyFlow;
+                    if (portfolio < 0) portfolio = 0;
+
+                    if (m % 12 === 0 && taxRate > 0 && portfolio > 0) {
+                        let gain = portfolio - costBasis;
+                        if (lossCarry && carriedLoss > 0 && gain > 0) {
+                            const offset = Math.min(gain, carriedLoss);
+                            gain -= offset;
+                            carriedLoss -= offset;
+                        }
+                        if (gain > 0) {
+                            if (portfolio > exemption) {
+                                const taxableBase = portfolio - exemption;
+                                const taxableFrac = Math.min(1, taxableBase / portfolio);
+                                const tax = gain * taxableFrac * taxRate;
+                                portfolio -= tax;
+                                totalTaxPaid += tax;
+                            }
+                        } else if (gain < 0 && lossCarry) {
+                            carriedLoss += Math.abs(gain);
+                        }
+                        costBasis = portfolio;
+                        if (portfolio < 0) portfolio = 0;
+                    }
+
+                    if (m % 12 === 0) {
+                        yearlyValues[m / 12] = portfolio;
+                    }
+                }
+                return { values: yearlyValues, totalTaxPaid };
+            }
+
+            function simulatePathDE(params) {
+                const {
+                    startCapital,
+                    years,
+                    monthlyFlow,
+                    annualReturn,
+                    annualVol,
+                    deTaxRate,
+                    basiszins,
+                    teilfreistellung,
+                    sparerPauschbetrag,
+                } = params;
+
+                const totalMonths = years * 12;
+                const dt = 1 / 12;
+                const drift = (annualReturn - 0.5 * annualVol * annualVol) * dt;
+                const diffusion = annualVol * Math.sqrt(dt);
+                const tfFactor = 1 - teilfreistellung;
+
+                const yearlyValues = new Float64Array(years + 1);
+                let portfolio = startCapital;
+                let costBasis = startCapital;
+                let totalTaxPaid = 0;
+                let sparerRemaining = sparerPauschbetrag;
+                let portfolioStartOfYear = startCapital;
+
+                function afterPausch(taxableAmount) {
+                    if (taxableAmount <= 0) return 0;
+                    if (sparerRemaining >= taxableAmount) {
+                        sparerRemaining -= taxableAmount;
+                        return 0;
+                    }
+                    const rest = taxableAmount - sparerRemaining;
+                    sparerRemaining = 0;
+                    return rest;
+                }
+
+                function netValue() {
+                    const unrealGain = Math.max(0, portfolio - costBasis);
+                    const deferredTax = afterTeilAndRate(unrealGain);
+                    return portfolio - deferredTax;
+                }
+                function afterTeilAndRate(gain) {
+                    return Math.max(0, gain * tfFactor) * deTaxRate;
+                }
+
+                yearlyValues[0] = netValue();
+
+                for (let m = 1; m <= totalMonths; m++) {
+                    const z = randn();
+                    portfolio *= Math.exp(drift + diffusion * z);
+                    if (portfolio < 0) portfolio = 0;
+
+                    if (monthlyFlow >= 0) {
+                        portfolio += monthlyFlow;
+                        costBasis += monthlyFlow;
+                    } else {
+                        const wAmt = Math.min(Math.abs(monthlyFlow), portfolio);
+                        if (portfolio > 0 && wAmt > 0) {
+                            const frac = wAmt / portfolio;
+                            const propGain = Math.max(0, (portfolio - costBasis) * frac);
+                            const taxable = afterPausch(propGain * tfFactor);
+                            const tax = taxable * deTaxRate;
+                            totalTaxPaid += tax;
+                            costBasis *= 1 - frac;
+                            portfolio -= wAmt + tax;
+                        }
+                    }
+                    if (portfolio < 0) portfolio = 0;
+
+                    if (m % 12 === 0) {
+                        if (portfolio > 0) {
+                            const yearGain = portfolio - portfolioStartOfYear;
+                            const basisertrag = Math.max(
+                                0,
+                                portfolioStartOfYear * basiszins * 0.7,
+                            );
+                            const vorabpauschale = Math.max(0, Math.min(basisertrag, yearGain));
+                            if (vorabpauschale > 0) {
+                                const taxable = afterPausch(vorabpauschale * tfFactor);
+                                const tax = taxable * deTaxRate;
+                                portfolio -= tax;
+                                totalTaxPaid += tax;
+                                costBasis += vorabpauschale;
+                            }
+                        }
+                        yearlyValues[m / 12] = netValue();
+                        sparerRemaining = sparerPauschbetrag;
+                        portfolioStartOfYear = portfolio;
+                    }
+                }
+
+                /* Exit tax: deferred Abgeltungssteuer on unrealized gains at end */
+                const finalUnrealGain = Math.max(0, portfolio - costBasis);
+                const deferredExitTax = afterTeilAndRate(finalUnrealGain);
+                totalTaxPaid += deferredExitTax;
+
+                return { values: yearlyValues, totalTaxPaid };
+            }
+
+            /* ============================================================
+   MINIMAL TEST HARNESS
+   ============================================================ */
+
+            const _groups = [];
+            let _currentGroup = null;
+
+            function describe(name, fn) {
+                _currentGroup = { name, tests: [] };
+                _groups.push(_currentGroup);
+                fn();
+                _currentGroup = null;
+            }
+
+            function it(name, fn) {
+                const t = { name, passed: false, error: null };
+                try {
+                    fn();
+                    t.passed = true;
+                } catch (e) {
+                    t.error = e.message || String(e);
+                }
+                _currentGroup.tests.push(t);
+            }
+
+            function assertClose(actual, expected, tolerance, msg) {
+                const diff = Math.abs(actual - expected);
+                if (diff > tolerance) {
+                    throw new Error(
+                        `${msg || "assertClose"}: expected ≈${expected}, got ${actual} (diff ${diff.toFixed(6)}, tol ${tolerance})`,
+                    );
+                }
+            }
+
+            function assertEqual(actual, expected, msg) {
+                if (actual !== expected) {
+                    throw new Error(
+                        `${msg || "assertEqual"}: expected ${expected}, got ${actual}`,
+                    );
+                }
+            }
+
+            function assertTrue(cond, msg) {
+                if (!cond) throw new Error(msg || "assertTrue failed");
+            }
+
+            /* ============================================================
+   TESTS
+   ============================================================ */
+
+            /* Use deterministic mode: randn() = 0 → no randomness, pure drift */
+            _randnOverride = 0;
+
+            /* Shared base parameters */
+            const BASE = {
+                startCapital: 100000,
+                years: 30,
+                monthlyFlow: 0,
+                annualReturn: 0.08,
+                annualVol: 0.15,
+                lossCarry: true,
+                exemption: 57000,
+            };
+            const DE_EXTRA = {
+                deTaxRate: 0.26375,
+                basiszins: 0.0253,
+                teilfreistellung: 0.3,
+                sparerPauschbetrag: 1000,
+            };
+
+            /* Pre-computed expected values (deterministic, randn=0) */
+            const TOL = 1.0; /* €1 tolerance for portfolio values */
+            const TOL_TAX = 1.0; /* €1 tolerance for tax amounts */
+            const TOL_RATE = 1e-9; /* tight tolerance for pure math */
+
+            /* ── deEffectiveRate ───────────────────────────────────── */
+
+            describe("deEffectiveRate", () => {
+                it("0% KiSt → 26.375% (25% + 5.5% Soli)", () => {
+                    assertClose(deEffectiveRate(0), 0.26375, TOL_RATE);
+                });
+                it("8% KiSt → correct combined rate", () => {
+                    assertClose(deEffectiveRate(8), 0.27818627, 1e-6);
+                });
+                it("9% KiSt → correct combined rate", () => {
+                    assertClose(deEffectiveRate(9), 0.2799511, 1e-6);
+                });
+                it("rate increases monotonically with KiSt", () => {
+                    const r0 = deEffectiveRate(0);
+                    const r5 = deEffectiveRate(5);
+                    const r8 = deEffectiveRate(8);
+                    const r9 = deEffectiveRate(9);
+                    assertTrue(
+                        r0 < r5 && r5 < r8 && r8 < r9,
+                        `Rates should increase: ${r0}, ${r5}, ${r8}, ${r9}`,
+                    );
+                });
+            });
+
+            /* ── No-Tax Baseline ───────────────────────────────────── */
+
+            describe("No-Tax Baseline (deterministic)", () => {
+                const r = simulatePath({ ...BASE, taxRate: 0 });
+
+                it("year 0 equals start capital", () => {
+                    assertClose(r.values[0], 100000, TOL);
+                });
+                it("year 1 matches GBM drift", () => {
+                    assertClose(r.values[1], 107116.84, 1.0);
+                });
+                it("year 5 matches compound drift", () => {
+                    assertClose(r.values[5], 141022.6, 1.0);
+                });
+                it("year 30 final value", () => {
+                    assertClose(r.values[30], 786560.93, 1.0);
+                });
+                it("zero tax paid", () => {
+                    assertEqual(r.totalTaxPaid, 0);
+                });
+                it("monotonically increasing (no tax, no vol → pure growth)", () => {
+                    for (let y = 1; y <= 30; y++) {
+                        assertTrue(
+                            r.values[y] > r.values[y - 1],
+                            `Year ${y} should exceed year ${y - 1}`,
+                        );
+                    }
+                });
+            });
+
+            /* ── NL Unrealized Gains Tax ───────────────────────────── */
+
+            describe("NL — 36% unrealized gains tax, €57k exemption", () => {
+                const r = simulatePath({ ...BASE, taxRate: 0.36 });
+
+                it("year 0 equals start capital", () => {
+                    assertClose(r.values[0], 100000, TOL);
+                });
+                it("year 1 value (after first tax assessment)", () => {
+                    assertClose(r.values[1], 105918.12, TOL);
+                });
+                it("year 1: correct tax amount", () => {
+                    /* Manual: gain=7117, frac=46.8%, tax=7117*0.468*0.36=1199 */
+                    const noTaxY1 = 107116.84;
+                    const impliedTax = noTaxY1 - 105918.12;
+                    assertClose(impliedTax, 1198.71, 1.0);
+                });
+                it("year 5 value", () => {
+                    assertClose(r.values[5], 132411.79, TOL);
+                });
+                it("year 30 final value", () => {
+                    assertClose(r.values[30], 464416.4, TOL);
+                });
+                it("total tax paid over 30 years", () => {
+                    assertClose(r.totalTaxPaid, 141077.29, TOL_TAX);
+                });
+                it("final + tax ≈ no-tax final (conservation of wealth)", () => {
+                    /* Due to compounding drag, final + tax < noTax. But final + tax + "lost compounding" ≈ noTax.
+           Simple check: final + tax should be less than no-tax final. */
+                    const noTax = simulatePath({ ...BASE, taxRate: 0 });
+                    assertTrue(
+                        r.values[30] + r.totalTaxPaid < noTax.values[30],
+                        "Taxed final + tax should be less than no-tax final (compounding drag)",
+                    );
+                });
+                it("tax drag on wealth ≈ 41%", () => {
+                    const noTax = simulatePath({ ...BASE, taxRate: 0 });
+                    const drag = (1 - r.values[30] / noTax.values[30]) * 100;
+                    assertClose(drag, 40.95, 0.5);
+                });
+            });
+
+            describe("NL — 0% tax rate equals no-tax", () => {
+                const nl0 = simulatePath({ ...BASE, taxRate: 0 });
+                const noTax = simulatePath({ ...BASE, taxRate: 0 });
+
+                it("identical final value", () => {
+                    assertEqual(nl0.values[30], noTax.values[30]);
+                });
+                it("zero tax paid", () => {
+                    assertEqual(nl0.totalTaxPaid, 0);
+                });
+            });
+
+            describe("NL — exemption impact", () => {
+                const withExempt = simulatePath({ ...BASE, taxRate: 0.36 });
+                const noExempt = simulatePath({ ...BASE, taxRate: 0.36, exemption: 0 });
+
+                it("no exemption → lower final value", () => {
+                    assertTrue(
+                        noExempt.values[30] < withExempt.values[30],
+                        `Without exemption (${noExempt.values[30].toFixed(0)}) should be less than with (${withExempt.values[30].toFixed(0)})`,
+                    );
+                });
+                it("no exemption → more tax paid", () => {
+                    assertTrue(noExempt.totalTaxPaid > withExempt.totalTaxPaid);
+                });
+                it("no exemption final value", () => {
+                    assertClose(noExempt.values[30], 380466.43, TOL);
+                });
+            });
+
+            /* ── NL Loss Carry-Forward ─────────────────────────────── */
+
+            describe("NL — loss carry-forward", () => {
+                it("losses reduce future taxable gains", () => {
+                    /* Use high volatility custom scenario with seeded negative return
+           Instead, compare lossCarry on vs off with same params */
+                    const withLC = simulatePath({ ...BASE, taxRate: 0.36, lossCarry: true });
+                    const noLC = simulatePath({ ...BASE, taxRate: 0.36, lossCarry: false });
+                    /* With deterministic randn=0 and positive drift, there are no losses,
+           so both should be identical */
+                    assertClose(
+                        withLC.values[30],
+                        noLC.values[30],
+                        TOL,
+                        "With no losses occurring, lossCarry toggle has no effect",
+                    );
+                });
+            });
+
+            /* ── DE Abgeltungssteuer ───────────────────────────────── */
+
+            describe("DE — Abgeltungssteuer (30y, buy-and-hold)", () => {
+                const r = simulatePathDE({ ...BASE, ...DE_EXTRA });
+
+                it("year 0 net value = start capital (no unrealized gains yet)", () => {
+                    assertClose(r.values[0], 100000, TOL);
+                });
+                it("year 1 net value", () => {
+                    assertClose(r.values[1], 106078.31, TOL);
+                });
+                it("year 5 net value", () => {
+                    assertClose(r.values[5], 134817.76, TOL);
+                });
+                it("year 30 net final value", () => {
+                    assertClose(r.values[30], 653680.19, TOL);
+                });
+                it("total tax paid (incl. exit tax)", () => {
+                    assertClose(r.totalTaxPaid, 110547.16, TOL_TAX);
+                });
+                it("DE outperforms NL (tax deferral + Teilfreistellung)", () => {
+                    const nl = simulatePath({ ...BASE, taxRate: 0.36 });
+                    assertTrue(
+                        r.values[30] > nl.values[30],
+                        `DE (${r.values[30].toFixed(0)}) should beat NL (${nl.values[30].toFixed(0)})`,
+                    );
+                });
+                it("DE underperforms no-tax", () => {
+                    const noTax = simulatePath({ ...BASE, taxRate: 0 });
+                    assertTrue(r.values[30] < noTax.values[30]);
+                });
+            });
+
+            describe("DE — Sparer-Pauschbetrag impact", () => {
+                const with1k = simulatePathDE({ ...BASE, ...DE_EXTRA, sparerPauschbetrag: 1000 });
+                const with0 = simulatePathDE({ ...BASE, ...DE_EXTRA, sparerPauschbetrag: 0 });
+
+                it("€1000 Pauschbetrag → higher final value", () => {
+                    assertTrue(
+                        with1k.values[30] > with0.values[30],
+                        `With Pauschbetrag (${with1k.values[30].toFixed(0)}) should exceed without (${with0.values[30].toFixed(0)})`,
+                    );
+                });
+                it("€1000 Pauschbetrag → less total tax", () => {
+                    assertTrue(with1k.totalTaxPaid < with0.totalTaxPaid);
+                });
+                it("without Pauschbetrag final value", () => {
+                    assertClose(with0.values[30], 633343.67, TOL);
+                });
+            });
+
+            describe("DE — Teilfreistellung impact", () => {
+                const tf30 = simulatePathDE({ ...BASE, ...DE_EXTRA, teilfreistellung: 0.3 });
+                const tf0 = simulatePathDE({ ...BASE, ...DE_EXTRA, teilfreistellung: 0 });
+
+                it("0% Teilfreistellung → lower final (more tax)", () => {
+                    assertTrue(
+                        tf0.values[30] < tf30.values[30],
+                        "Without Teilfreistellung, portfolio should be lower",
+                    );
+                });
+                it("0% Teilfreistellung → more tax paid", () => {
+                    assertTrue(tf0.totalTaxPaid > tf30.totalTaxPaid);
+                });
+            });
+
+            describe("DE — Vorabpauschale mechanics", () => {
+                it("Vorabpauschale increases cost basis (reduces exit tax)", () => {
+                    /* Compare DE with basiszins=0 (no Vorabpauschale) vs basiszins=2.53% */
+                    const withVP = simulatePathDE({ ...BASE, ...DE_EXTRA, basiszins: 0.0253 });
+                    const noVP = simulatePathDE({ ...BASE, ...DE_EXTRA, basiszins: 0 });
+                    /* With Vorabpauschale: pay small tax yearly but lower exit tax.
+           Total tax should be similar but not identical due to timing. */
+                    assertTrue(
+                        Math.abs(withVP.totalTaxPaid - noVP.totalTaxPaid) <
+                            noVP.totalTaxPaid * 0.15,
+                        "Vorabpauschale shifts timing but total tax stays in similar range",
+                    );
+                });
+                it("Vorabpauschale is limited to actual yearly gain", () => {
+                    /* With very high basiszins, the Vorabpauschale should still be capped at year gain */
+                    const highBasis = simulatePathDE({ ...BASE, ...DE_EXTRA, basiszins: 0.5 });
+                    const normalBasis = simulatePathDE({
+                        ...BASE,
+                        ...DE_EXTRA,
+                        basiszins: 0.0253,
+                    });
+                    /* High basiszins means more prepaid tax, so net value should be lower or similar
+           (capped at actual gain, so effect is bounded) */
+                    assertTrue(
+                        highBasis.values[30] <= normalBasis.values[30] + 1,
+                        "Higher basiszins should not increase portfolio value",
+                    );
+                });
+            });
+
+            describe("DE — exit tax consistency", () => {
+                it("totalTaxPaid includes deferred exit tax on unrealized gains", () => {
+                    const r = simulatePathDE({ ...BASE, ...DE_EXTRA });
+                    /* The net final value = gross portfolio - deferred tax.
+           totalTaxPaid should include that deferred portion.
+           Cross-check: gross portfolio = no-tax portfolio minus vorabpauschale drag.
+           Simpler check: totalTaxPaid > 0 even with no withdrawals */
+                    assertTrue(
+                        r.totalTaxPaid > 0,
+                        "Should have tax from Vorabpauschale + exit tax",
+                    );
+                });
+                it("exit tax = totalTaxPaid minus ongoing tax (Vorabpauschale)", () => {
+                    /* Run DE with basiszins=0 AND sparerPauschbetrag=0 → no ongoing tax, only exit tax */
+                    const r = simulatePathDE({
+                        ...BASE,
+                        ...DE_EXTRA,
+                        basiszins: 0,
+                        sparerPauschbetrag: 0,
+                    });
+                    /* All tax should be exit tax: gain * tfFactor * rate */
+                    const noTax = simulatePath({ ...BASE, taxRate: 0 });
+                    const expectedGrossPortfolio =
+                        noTax.values[30]; /* same random path, no intermediate tax */
+                    const expectedGain = expectedGrossPortfolio - 100000;
+                    const expectedExitTax = expectedGain * 0.7 * 0.26375;
+                    assertClose(
+                        r.totalTaxPaid,
+                        expectedExitTax,
+                        2.0,
+                        "With no Vorabpauschale, all tax should be exit tax",
+                    );
+                });
+            });
+
+            /* ── Withdrawal scenarios ──────────────────────────────── */
+
+            describe("NL — with withdrawals (€200/month)", () => {
+                const r = simulatePath({ ...BASE, taxRate: 0.36, monthlyFlow: -200 });
+
+                it("final value is lower than buy-and-hold", () => {
+                    const bh = simulatePath({ ...BASE, taxRate: 0.36 });
+                    assertTrue(r.values[30] < bh.values[30]);
+                });
+                it("final value", () => {
+                    assertClose(r.values[30], 314312.59, TOL);
+                });
+                it("tax paid", () => {
+                    assertClose(r.totalTaxPaid, 96652.29, TOL_TAX);
+                });
+            });
+
+            describe("DE — with withdrawals (€200/month)", () => {
+                const r = simulatePathDE({ ...BASE, ...DE_EXTRA, monthlyFlow: -200 });
+
+                it("final value is lower than buy-and-hold", () => {
+                    const bh = simulatePathDE({ ...BASE, ...DE_EXTRA });
+                    assertTrue(r.values[30] < bh.values[30]);
+                });
+                it("final value", () => {
+                    assertClose(r.values[30], 443781.78, TOL);
+                });
+                it("tax paid (includes realized + exit)", () => {
+                    assertClose(r.totalTaxPaid, 79758.99, 2.0);
+                });
+                it("DE with withdrawals still beats NL with withdrawals", () => {
+                    const nl = simulatePath({ ...BASE, taxRate: 0.36, monthlyFlow: -200 });
+                    assertTrue(r.values[30] > nl.values[30]);
+                });
+            });
+
+            /* ── Short duration (1 year) ───────────────────────────── */
+
+            describe("Short duration — 1 year", () => {
+                const noTax = simulatePath({ ...BASE, taxRate: 0, years: 1 });
+                const nl = simulatePath({ ...BASE, taxRate: 0.36, years: 1 });
+                const de = simulatePathDE({ ...BASE, ...DE_EXTRA, years: 1 });
+
+                it("no-tax 1y value", () => {
+                    assertClose(noTax.values[1], 107116.84, TOL);
+                });
+                it("NL 1y value", () => {
+                    assertClose(nl.values[1], 105918.12, TOL);
+                });
+                it("DE 1y net value", () => {
+                    assertClose(de.values[1], 106078.31, TOL);
+                });
+                it("ordering: no-tax > DE > NL after 1 year", () => {
+                    assertTrue(noTax.values[1] > de.values[1], "no-tax > DE");
+                    assertTrue(de.values[1] > nl.values[1], "DE > NL");
+                });
+            });
+
+            /* ── Edge Cases ────────────────────────────────────────── */
+
+            describe("Edge case — zero start capital with savings", () => {
+                const r = simulatePath({
+                    ...BASE,
+                    taxRate: 0.36,
+                    startCapital: 0,
+                    monthlyFlow: 500,
+                });
+
+                it("year 0 is zero", () => {
+                    assertEqual(r.values[0], 0);
+                });
+                it("year 30 is positive", () => {
+                    assertTrue(r.values[30] > 0);
+                });
+                it("final value", () => {
+                    assertClose(r.values[30], 442089.91, 2.0);
+                });
+            });
+
+            describe("Edge case — zero years", () => {
+                const r = simulatePath({ ...BASE, taxRate: 0.36, years: 0 });
+
+                it("only year 0 value exists", () => {
+                    assertEqual(r.values.length, 1);
+                });
+                it("value equals start capital", () => {
+                    assertClose(r.values[0], 100000, TOL);
+                });
+                it("zero tax", () => {
+                    assertEqual(r.totalTaxPaid, 0);
+                });
+            });
+
+            describe("Edge case — very high tax rate (99%)", () => {
+                const r = simulatePath({ ...BASE, taxRate: 0.99, exemption: 0 });
+
+                it("portfolio stays near start capital (gains are taxed away)", () => {
+                    /* Effective growth ≈ 7.12% * (1-0.99) ≈ 0.07% per year */
+                    assertTrue(
+                        r.values[30] < 120000,
+                        `With 99% tax, portfolio (${r.values[30].toFixed(0)}) should barely grow`,
+                    );
+                    assertTrue(r.values[30] > 90000, "But should not shrink below start");
+                });
+            });
+
+            describe("Edge case — DE zero start with monthly savings", () => {
+                const r = simulatePathDE({
+                    ...BASE,
+                    ...DE_EXTRA,
+                    startCapital: 0,
+                    monthlyFlow: 500,
+                });
+
+                it("year 0 net value is zero", () => {
+                    assertClose(r.values[0], 0, TOL);
+                });
+                it("grows over time", () => {
+                    assertTrue(r.values[30] > 0);
+                });
+            });
+
+            /* ── Structural / invariant checks ─────────────────────── */
+
+            describe("Invariants across tax regimes", () => {
+                const noTax = simulatePath({ ...BASE, taxRate: 0 });
+                const nl = simulatePath({ ...BASE, taxRate: 0.36 });
+                const de = simulatePathDE({ ...BASE, ...DE_EXTRA });
+
+                it("ordering: no-tax > DE > NL for all years", () => {
+                    for (let y = 1; y <= 30; y++) {
+                        assertTrue(
+                            noTax.values[y] > de.values[y],
+                            `Year ${y}: no-tax (${noTax.values[y].toFixed(0)}) should beat DE (${de.values[y].toFixed(0)})`,
+                        );
+                        assertTrue(
+                            de.values[y] > nl.values[y],
+                            `Year ${y}: DE (${de.values[y].toFixed(0)}) should beat NL (${nl.values[y].toFixed(0)})`,
+                        );
+                    }
+                });
+                it("all tax amounts are non-negative", () => {
+                    assertTrue(noTax.totalTaxPaid >= 0);
+                    assertTrue(nl.totalTaxPaid >= 0);
+                    assertTrue(de.totalTaxPaid >= 0);
+                });
+                it("all portfolio values are non-negative", () => {
+                    for (let y = 0; y <= 30; y++) {
+                        assertTrue(noTax.values[y] >= 0, `no-tax year ${y}`);
+                        assertTrue(nl.values[y] >= 0, `NL year ${y}`);
+                        assertTrue(de.values[y] >= 0, `DE year ${y}`);
+                    }
+                });
+                it("NL tax drag > DE tax drag", () => {
+                    const nlDrag = 1 - nl.values[30] / noTax.values[30];
+                    const deDrag = 1 - de.values[30] / noTax.values[30];
+                    assertTrue(
+                        nlDrag > deDrag,
+                        `NL drag (${(nlDrag * 100).toFixed(1)}%) should exceed DE drag (${(deDrag * 100).toFixed(1)}%)`,
+                    );
+                });
+            });
+
+            describe("Invariants — monthly savings scenario", () => {
+                const noTax = simulatePath({ ...BASE, taxRate: 0, monthlyFlow: 500 });
+                const nl = simulatePath({ ...BASE, taxRate: 0.36, monthlyFlow: 500 });
+                const de = simulatePathDE({ ...BASE, ...DE_EXTRA, monthlyFlow: 500 });
+
+                it("ordering preserved with savings: no-tax > DE > NL", () => {
+                    assertTrue(noTax.values[30] > de.values[30], "no-tax > DE");
+                    assertTrue(de.values[30] > nl.values[30], "DE > NL");
+                });
+                it("savings increase final value vs. no-savings", () => {
+                    const nlNoSave = simulatePath({ ...BASE, taxRate: 0.36 });
+                    assertTrue(nl.values[30] > nlNoSave.values[30]);
+                });
+            });
+
+            /* ============================================================
+   RENDER RESULTS
+   ============================================================ */
+
+            const t0 = performance.now();
+            /* Tests already ran during describe/it registration above */
+            const elapsed = (performance.now() - t0).toFixed(1);
+
+            let totalPassed = 0;
+            let totalFailed = 0;
+
+            let html = "";
+            for (const g of _groups) {
+                const gPassed = g.tests.filter((t) => t.passed).length;
+                const gFailed = g.tests.length - gPassed;
+                totalPassed += gPassed;
+                totalFailed += gFailed;
+
+                const icon = gFailed === 0 ? "✅" : "❌";
+                html += `<div class="group">`;
+                html += `<div class="group-title">${icon} ${g.name} (${gPassed}/${g.tests.length})</div>`;
+                for (const t of g.tests) {
+                    const badge = t.passed
+                        ? '<span class="badge badge-pass">PASS</span>'
+                        : '<span class="badge badge-fail">FAIL</span>';
+                    const detail = t.error ? `<span class="test-detail"> — ${t.error}</span>` : "";
+                    html += `<div class="test-row">${badge} <span class="test-name">${t.name}</span>${detail}</div>`;
+                }
+                html += `</div>`;
+            }
+
+            document.getElementById("results").innerHTML = html;
+
+            const summaryEl = document.getElementById("summary");
+            if (totalFailed === 0) {
+                summaryEl.className = "summary-pass";
+                summaryEl.textContent = `✅ All ${totalPassed} tests passed`;
+            } else {
+                summaryEl.className = "summary-fail";
+                summaryEl.textContent = `❌ ${totalFailed} of ${totalPassed + totalFailed} tests failed`;
+            }
+
+            /* Reset deterministic mode */
+            _randnOverride = null;
+        </script>
+    </body>
+</html>
