@@ -309,6 +309,23 @@
                 border-radius: 6px;
                 transition: width 0.5s ease;
             }
+            .footer {
+                text-align: center;
+                padding: 1.5rem;
+                color: var(--text-dim);
+                font-size: 0.75rem;
+                border-top: 1px solid var(--border);
+                background: var(--surface);
+            }
+            .footer a {
+                color: var(--text-dim);
+                text-decoration: none;
+                margin: 0 0.8rem;
+                transition: color 0.2s;
+            }
+            .footer a:hover {
+                color: var(--accent);
+            }
             @media (max-width: 900px) {
                 .app {
                     grid-template-columns: 1fr;
@@ -503,6 +520,17 @@
                 <div class="comparison-row" id="comparisonRow" style="display: none"></div>
             </main>
         </div>
+
+        <footer class="footer">
+            <a
+                href="https://github.com/kiney/unrealized-gains-tax-simulator"
+                target="_blank"
+                rel="noopener"
+                >GitHub</a
+            >
+            &middot;
+            <a href="https://cubigato.de/impressum/" target="_blank" rel="noopener">Imprint</a>
+        </footer>
 
         <script>
             /* ==========================================================
@@ -787,6 +815,14 @@
                         portfolioStartOfYear = portfolio;
                     }
                 }
+
+                /* Add deferred tax on unrealized gains (exit tax on final sale)
+                   so that totalTaxPaid is consistent with the net final value.
+                   Uses afterTeilAndRate (same as netValue) — without Pauschbetrag,
+                   to stay conservative and consistent with the displayed net value. */
+                const finalUnrealGain = Math.max(0, portfolio - costBasis);
+                const deferredExitTax = afterTeilAndRate(finalUnrealGain);
+                totalTaxPaid += deferredExitTax;
 
                 return { values: yearlyValues, totalTaxPaid };
             }
